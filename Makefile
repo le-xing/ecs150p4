@@ -4,7 +4,7 @@ programs :=		\
 
 # File-system library
 FSLIB := libfs
-FSPATH := ../$(FSLIB)
+FSPATH := $(FSLIB)
 libfs := $(FSPATH)/$(FSLIB).a
 
 # Default rule
