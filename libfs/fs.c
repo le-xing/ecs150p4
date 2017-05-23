@@ -28,10 +28,10 @@ struct __attribute__((__packed__)) rootEntry {
     uint32_t size;
     uint16_t firstBlock;
     char padding[10];
-}
+};
 
 struct __attribute__((__packed__)) rootDirectory {
-    rootEntry_t entries[128];
+    struct rootEntry entries[128];
 };
 
 
