@@ -24,32 +24,6 @@ struct disk {
 /* Currently open virtual disk (invalid by default) */
 static struct disk disk = { .fd = INVALID_FD };
 
-int block_disk_create(const char *diskname, size_t bcount)
-{
-	int fd;
-
-	if (!diskname) {
-		block_error("invalid file diskname");
-		return -1;
-	}
-
-	/* Create and open virtual disk file */
-	if ((fd = open(diskname, O_WRONLY | O_CREAT | O_TRUNC, 0644)) < 0) {
-		perror("open");
-		return -1;
-	}
-
-	/* Fill out the file with (bcount * BLOCK_SIZE) empty bytes */
-	if (ftruncate(fd, bcount * BLOCK_SIZE) < 0) {
-		perror("ftruncate");
-		return -1;
-	}
-
-	close(fd);
-
-	return 0;
-}
-
 int block_disk_open(const char *diskname)
 {
 	int fd;

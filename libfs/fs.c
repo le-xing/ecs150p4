@@ -7,8 +7,13 @@
 #include "disk.h"
 #include "fs.h"
 
-typedef struct rootEntry* rootEntry_t
+#define FAT_EOC 0xFFFF
 
+typedef struct rootEntry* rootEntry_t;
+typedef struct superblock* superblock_t;
+typedef struct FAT* fat_t;
+typedef struct rootDirectory* rootDirectory_t;
+ 
 struct __attribute__((__packed__)) superblock {
     char signature[8];
     uint16_t numBlocks;
@@ -35,17 +40,40 @@ struct __attribute__((__packed__)) rootDirectory {
 };
 
 
+superblock_t superblock;
+fat_t fat;
+rootDirectory_t root;
+
+
 int fs_mount(const char *diskname)
 {
     if(block_disk_open(diskname)) {
         return -1;
     }
 
+    block_read(0, (void*)superblock);
+    if (memcmp(superblock->signature, "ECS150FS", 8)) {
+       return -1;
+    }
+
+    fat->entries = (uint16_t*)malloc(superblock->numFATBlocks*BLOCK_SIZE);
+    for (int i = 1; i <= superblock->numFATBlocks; i++) {
+        block_read(i, (void*)fat);
+    }
+
+    if (fat->entries[0] != FAT_EOC) {
+        return -1;
+    }
+
+    block_read(superblock->root, (void*)root);
+
 	return 0;
 }
 
 int fs_umount(void)
 {
+    
+    block_disk_close();
 	return 0;
 }
 

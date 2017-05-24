@@ -7,19 +7,6 @@
 #define BLOCK_SIZE 4096
 
 /**
- * block_disk_create - Create a virtual disk file
- * @diskname: Name of the virtual disk file
- * @bcount: Block count
- *
- * Create a virtual disk of size @bcount x %BLOCK_SIZE bytes, as a single file
- * named @diskname on the host computer.
- *
- * Return: -1 if @diskname is invalid or if the virtual disk file cannot be
- * created or truncated to the right size. 0 otherwise.
- */
-int block_disk_create(const char *diskname, size_t bcount);
-
-/**
  * block_disk_open - Open virtual disk file
  * @diskname: Name of the virtual disk file
  *
