@@ -31,9 +31,17 @@ struct __attribute__((__packed__)) rootEntry {
     char padding[10];
 };
 
+struct __attribute__((__packed__)) fileDescriptor {
+    char* filename;
+    int offset;
+    int fd;
+};
+
 superblock_t superblock;
 struct rootEntry *root;
+struct fileDescriptor fileDescriptors[32];
 uint16_t *fat;
+void* data;
 int fatFree = 0;
 int rootFree = 0;
 int numOpen = 0;
@@ -54,14 +62,19 @@ int fs_mount(const char *diskname)
     for (int i = 1; i <= superblock->numFATBlocks; i++) {
         block_read(i, (void*)(fat + BLOCK_SIZE*(i - 1)));
     }
-/*    if (fat[0] != FAT_EOC) {
-        return -1;
-    }
-*/
+
     root = (rootEntry_t)malloc(FS_FILE_MAX_COUNT*sizeof(struct rootEntry));
     block_read(superblock->root, (void*)root);
 
-    for(int i = 1; i < superblock->numDataBlocks; i++) {
+    data = malloc(superblock->numDataBlocks*BLOCK_SIZE);
+    for (int i = superblock->data; i < superblock->data + superblock->numDataBlocks; i++) {
+        int increment = 0;
+        block_read(i, (void*)(data + BLOCK_SIZE*increment));
+        increment++;
+    }
+
+    fat[0] = FAT_EOC;
+    for(int i = 0; i < superblock->numDataBlocks; i++) {
         if(fat[i] == 0) {
             fatFree++;
         }
@@ -71,6 +84,12 @@ int fs_mount(const char *diskname)
         if(root[j].filename[0] == 0) {
             rootFree++;
         }
+    }
+
+    for(int k = 0; k < 32; k++){
+        fileDescriptors[k].filename = NULL;
+        fileDescriptors[k].fd = -1;
+        fileDescriptors[k].offset = -1;
     }
 
 	return 0;
@@ -91,7 +110,7 @@ int fs_umount(void)
 
 int fs_info(void)
 {
-    printf("FS Info\n");
+    printf("FS Info:\n");
     printf("total_blk_count=%d\n", superblock->numBlocks);
     printf("fat_blk_count=%d\n", superblock->numFATBlocks);
     printf("rdir_blk=%d\n", superblock->root);
@@ -104,21 +123,21 @@ int fs_info(void)
 
 int fs_create(const char *filename)
 {
-    if (rootFree == 0)
+    if (rootFree == 0 || strlen(filename) > FS_FILENAME_LEN || filename[strlen(filename)] != '\0')
         return -1;
-    if (strlen(filename) > FS_FILENAME_LEN)
-        return -1;
-    if (filename[strlen(filename)] != '\0')
-        return -1;
+
+    /* don't create the file if a file with the same name already exists on the FS */
     for(int i = 0; i < FS_FILE_MAX_COUNT; i++) {
         if(!strcmp(root[i].filename, filename))
             return -1;
     }
+
     for(int i = 0; i < FS_FILE_MAX_COUNT; i++) {
         if(root[i].filename[0] == 0) {
             strcpy(root[i].filename, filename);
             root[i].size = 0;
             root[i].firstBlock = FAT_EOC;
+            block_write(superblock->root, (void*) root);
             return 0;
         }
     }
@@ -132,7 +151,13 @@ int fs_delete(const char *filename)
         return -1;
     if (filename[strlen(filename)] != '\0')
         return -1;
-    for(int i = 0; i < FS_FILE_MAX_COUNT; i++) {
+
+    for (int k = 0; k < 32; k++) {
+        if(fileDescriptors[k].filename && !strcmp(fileDescriptors[k].filename, filename))
+            return -1;
+    }
+ 
+   for(int i = 0; i < FS_FILE_MAX_COUNT; i++) {
         if(!strcmp(root[i].filename, filename)) {
             root[i].filename[0] = 0;
             root[i].size = 0;
@@ -141,7 +166,6 @@ int fs_delete(const char *filename)
         }
     }
 
-    //return -1 if file is open...
 	return -1;
 }
 
@@ -158,19 +182,43 @@ int fs_ls(void)
 
 int fs_open(const char *filename)
 {
-    if (numOpen == FS_OPEN_MAX_COUNT)
-        return -1; 
-    if (strlen(filename) > FS_FILENAME_LEN)
-        return -1;
-    if (filename[strlen(filename)] != '\0')
-        return -1;
-    for(int i = 0; i < FS_FILE_MAX_COUNT; i++) {
-        if(!strcmp(root[i].filename, filename))
-            return -1;
+    int fileExists = 0;
+
+    if (numOpen == FS_OPEN_MAX_COUNT) { //max open files currently open
+       printf("max open files currently open\n");
+       return -1;
     }
-    int fd = open(filename, O_RDWR);
-    numOpen++;
-	return fd;
+    if (strlen(filename) > FS_FILENAME_LEN) { // filename is invalid
+       printf("filename too long\n"); 
+       return -1;
+    }
+    if (filename[strlen(filename)] != '\0') { // filename is invalid
+        printf("filename invalid\n");
+        return -1;
+    }
+
+    for(int i = 0; i <= FS_FILE_MAX_COUNT; i++) {
+        if(!strcmp(root[i].filename, filename)){ // file found
+            fileExists = 1;
+            break;
+        }
+    }
+
+    if(fileExists == 0)
+        return -1;
+
+    for(int k = 0; k < 32; k++){
+        if (fileDescriptors[k].fd == -1) {
+            fileDescriptors[k].filename = (char*)malloc(FS_FILENAME_LEN);
+            strcpy(fileDescriptors[k].filename, filename);
+            fileDescriptors[k].fd = k;
+            fileDescriptors[k].offset = 0;
+            numOpen++;
+            printf("fileDescriptor %d: %d\n", k, fileDescriptors[k].fd);
+            return fileDescriptors[k].fd;
+        }
+    }
+	return -1;
 }
 
 int fs_close(int fd)
@@ -178,17 +226,61 @@ int fs_close(int fd)
     if (fd > 31 || fd < 0) {
         return -1;
     }
-	return 0;
+
+    for (int k = 0; k < 32; k++) {
+        if(fileDescriptors[k].fd == fd) {
+            free(fileDescriptors[k].filename);
+            fileDescriptors[k].filename = NULL;       
+            fileDescriptors[k].fd = -1;
+            fileDescriptors[k].offset = -1;
+            numOpen--;
+            return 0;
+        }
+    }
+    
+
+	return -1; //file descriptor was not open
 }
 
 int fs_stat(int fd)
 {
-	return 0;
+    if (fd > 31 || fd < 0) {
+        return -1;
+    }
+
+    for (int k = 0; k < 32; k++) {
+        if(fileDescriptors[k].fd == fd) {
+            for(int i = 0; i < FS_FILE_MAX_COUNT; i++) {
+                if(!strcmp(root[i].filename, fileDescriptors[k].filename)) {
+                    return root[i].size;
+                }
+            }   
+        }
+    }
+
+	return -1;
 }
 
 int fs_lseek(int fd, size_t offset)
 {
-	return 0;
+    if (fd > 31 || fd < 0 || offset < 0) {
+        return -1;
+    }
+
+    for (int k = 0; k < 32; k++) {
+        if(fileDescriptors[k].fd == fd) {
+            for(int i = 0; i < FS_FILE_MAX_COUNT; i++) {
+                if(!strcmp(root[i].filename, fileDescriptors[k].filename)) {
+                    if(root[i].size < offset)
+                        return -1;
+                }
+            }
+            fileDescriptors[k].offset = offset;
+            return 0;
+        }
+    }
+ 
+	return -1; //file descriptor was not open
 }
 
 int fs_write(int fd, void *buf, size_t count)
