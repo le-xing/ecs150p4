@@ -39,12 +39,16 @@ struct __attribute__((__packed__)) fileDescriptor {
 
 superblock_t superblock;
 struct rootEntry *root;
-struct fileDescriptor fileDescriptors[32];
+struct fileDescriptor fileDescriptors[FS_OPEN_MAX_COUNT];
 uint16_t *fat;
 void* data;
 int fatFree = 0;
 int rootFree = 0;
 int numOpen = 0;
+
+int find_dataBlock(int offset, uint16_t firstBlock){
+    return firstBlock + (offset / 4096);
+}
 
 int fs_mount(const char *diskname)
 {
@@ -86,7 +90,7 @@ int fs_mount(const char *diskname)
         }
     }
 
-    for(int k = 0; k < 32; k++){
+    for(int k = 0; k < FS_OPEN_MAX_COUNT; k++){
         fileDescriptors[k].filename = NULL;
         fileDescriptors[k].fd = -1;
         fileDescriptors[k].offset = -1;
@@ -152,7 +156,7 @@ int fs_delete(const char *filename)
     if (filename[strlen(filename)] != '\0')
         return -1;
 
-    for (int k = 0; k < 32; k++) {
+    for (int k = 0; k < FS_OPEN_MAX_COUNT; k++) {
         if(fileDescriptors[k].filename && !strcmp(fileDescriptors[k].filename, filename))
             return -1;
     }
@@ -207,7 +211,7 @@ int fs_open(const char *filename)
     if(fileExists == 0)
         return -1;
 
-    for(int k = 0; k < 32; k++){
+    for(int k = 0; k < FS_OPEN_MAX_COUNT; k++){
         if (fileDescriptors[k].fd == -1) {
             fileDescriptors[k].filename = (char*)malloc(FS_FILENAME_LEN);
             strcpy(fileDescriptors[k].filename, filename);
@@ -223,11 +227,11 @@ int fs_open(const char *filename)
 
 int fs_close(int fd)
 {
-    if (fd > 31 || fd < 0) {
+    if (fd  >= FS_OPEN_MAX_COUNT || fd < 0) {
         return -1;
     }
 
-    for (int k = 0; k < 32; k++) {
+    for (int k = 0; k < FS_OPEN_MAX_COUNT; k++) {
         if(fileDescriptors[k].fd == fd) {
             free(fileDescriptors[k].filename);
             fileDescriptors[k].filename = NULL;       
@@ -244,11 +248,11 @@ int fs_close(int fd)
 
 int fs_stat(int fd)
 {
-    if (fd > 31 || fd < 0) {
+    if (fd >= FS_OPEN_MAX_COUNT || fd < 0) {
         return -1;
     }
 
-    for (int k = 0; k < 32; k++) {
+    for (int k = 0; k < FS_OPEN_MAX_COUNT; k++) {
         if(fileDescriptors[k].fd == fd) {
             for(int i = 0; i < FS_FILE_MAX_COUNT; i++) {
                 if(!strcmp(root[i].filename, fileDescriptors[k].filename)) {
@@ -263,11 +267,11 @@ int fs_stat(int fd)
 
 int fs_lseek(int fd, size_t offset)
 {
-    if (fd > 31 || fd < 0 || offset < 0) {
+    if (fd  >= FS_OPEN_MAX_COUNT || fd < 0 || offset < 0) {
         return -1;
     }
 
-    for (int k = 0; k < 32; k++) {
+    for (int k = 0; k < FS_OPEN_MAX_COUNT; k++) {
         if(fileDescriptors[k].fd == fd) {
             for(int i = 0; i < FS_FILE_MAX_COUNT; i++) {
                 if(!strcmp(root[i].filename, fileDescriptors[k].filename)) {
@@ -285,11 +289,36 @@ int fs_lseek(int fd, size_t offset)
 
 int fs_write(int fd, void *buf, size_t count)
 {
+    if (fd >= FS_OPEN_MAX_COUNT || fd < 0) {
+        return -1;
+    }
 	return 0;
 }
 
 int fs_read(int fd, void *buf, size_t count)
 {
+    if (fd >= FS_OPEN_MAX_COUNT || fd < 0) {
+            return -1;
+    }
+    for (int k = 0; k < FS_OPEN_MAX_COUNT; k++) {
+        if(fileDescriptors[k].fd == fd) {
+            for(int i = 0; i < FS_FILE_MAX_COUNT; i++) {
+                if(!strcmp(root[i].filename, fileDescriptors[k].filename)) {
+                    int readBlock = find_dataBlock(fileDescriptors[k].offset, root[i].firstBlock);
+                    int remainingBytes = root[i].size - fileDescriptors[k].offset; //remainingBytes until end of file
+                    void *bounceBuffer;
+                    block_read(readBlock, bounceBuffer);
+                    if(count > remainingBytes)
+                        memcpy(buf, bounceBuffer + (fileDescriptors[k].offset - 4096*(fileDescriptors[k].offset/4096)), remainingBytes);
+                    else
+                        memcpy(buf, bounceBuffer + (fileDescriptors[k].offset - 4096*(fileDescriptors[k].offset/4096)), count);
+                    //now we need to read the rest (span multiple blocks)  when remainingBytes or count > 4096 bytes
+                }
+            }
+            return 0;
+        }
+    }
+    
 	return 0;
 }
 
