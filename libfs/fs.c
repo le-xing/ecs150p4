@@ -122,10 +122,6 @@ int fs_info(void)
     printf("data_blk_count=%d\n", superblock->numDataBlocks);
     printf("fat_free_ratio=%d/%d\n", fatFree, superblock->numDataBlocks);
     printf("rdir_free_ratio=%d/%d\n", rootFree, FS_FILE_MAX_COUNT);
-
-for(int i = 0; i <128; i++) {
-    printf("%s, %d\n", root[i].filename, root[i].firstBlock);
-}
 	return 0;
 }
 
@@ -294,9 +290,10 @@ int fs_lseek(int fd, size_t offset)
 }
 
 int fs_write(int fd, void *buf, size_t count)
-{/*
+{
     int fileOpen = 0;
-    int offset, writeBlock;
+    int offset, writeBlock, blockBytes, bytesToWrite;
+    void* writeBuffer;
     if (fd >= FS_OPEN_MAX_COUNT || fd < 0) {
         return -1;
     }
@@ -308,6 +305,8 @@ int fs_write(int fd, void *buf, size_t count)
                 if(!strcmp(root[i].filename, fileDescriptors[k].filename)) { //check that file exists on disk
                     offset = fileDescriptors[k].offset;
                     writeBlock = find_dataBlock(fileDescriptors[k].offset, root[i].firstBlock); // find the block to write to
+                    if (offset + count > root[i].size) // extension needed
+                        
                     break;
                 }
             }
@@ -318,10 +317,10 @@ int fs_write(int fd, void *buf, size_t count)
     if (!fileOpen)
         return -1;
 
-    int remainingBytes = root[i].size - fileDescriptors[k].offset; //remainingBytes until end of file
+
+    int remainingBytes = BLOCK_SIZE*(root[i].size/BLOCK_SIZE) - root[i].size - fileDescriptors[k].offset; //remainingBytes until end of file
     if (count > remainingBytes) //extend to hold additional bytes
 
-*/
                         
     
 	return 0;
@@ -330,24 +329,25 @@ int fs_write(int fd, void *buf, size_t count)
 int fs_read(int fd, void *buf, size_t count)
 {
     int fileOpen = 0;
-    int readBlock, bytesToRead, blockBytes, offset, bytesRead = 0;
+    int readBlock, bytesToRead, blockBytes, offset, fdIndex, bytesRead = 0;
     void* bounceBuffer = NULL;
     if (fd >= FS_OPEN_MAX_COUNT || fd < 0) {
             return -1;
     }
 
-    for (int k = 0; k < FS_OPEN_MAX_COUNT; k++) {
-        if(fileDescriptors[k].fd == fd) { //check that file descriptor is open
+    for (fdIndex = 0; fdIndex < FS_OPEN_MAX_COUNT; fdIndex++) {
+        if(fileDescriptors[fdIndex].fd == fd) { //check that file descriptor is open
             fileOpen = 1;
             for(int i = 0; i < FS_FILE_MAX_COUNT; i++) {
-                if(!strcmp(root[i].filename, fileDescriptors[k].filename)) { //check that file exists on disk
-                    offset = fileDescriptors[k].offset;
-                    readBlock = find_dataBlock(fileDescriptors[k].offset, root[i].firstBlock); // find the block to read from
-                    int remainingBytes = root[i].size - fileDescriptors[k].offset; //remainingBytes until end of file
+                if(!strcmp(root[i].filename, fileDescriptors[fdIndex].filename)) { //check that file exists on disk
+                    offset = fileDescriptors[fdIndex].offset;
+                    readBlock = find_dataBlock(fileDescriptors[fdIndex].offset, root[i].firstBlock); // find the block to read from
+                    int remainingBytes = root[i].size - fileDescriptors[fdIndex].offset; //remainingBytes until end of file
                     if (count > remainingBytes)
                         bytesToRead = remainingBytes;
                     else
                         bytesToRead = count;
+                    
                     break;
                 }
             }
@@ -394,6 +394,7 @@ int fs_read(int fd, void *buf, size_t count)
         free(bounceBuffer);
     }   
   
+    fileDescriptors[fdIndex].offset += bytesRead; 
 	return bytesRead;
 }
 
