@@ -47,7 +47,7 @@ int rootFree = 0;
 int numOpen = 0;
 
 int find_dataBlock(int offset, uint16_t firstBlock){
-    return firstBlock + (offset / 4096);
+    return superblock->data + firstBlock + (offset / 4096);
 }
 
 int fs_mount(const char *diskname)
@@ -122,6 +122,10 @@ int fs_info(void)
     printf("data_blk_count=%d\n", superblock->numDataBlocks);
     printf("fat_free_ratio=%d/%d\n", fatFree, superblock->numDataBlocks);
     printf("rdir_free_ratio=%d/%d\n", rootFree, FS_FILE_MAX_COUNT);
+
+for(int i = 0; i <128; i++) {
+    printf("%s, %d\n", root[i].filename, root[i].firstBlock);
+}
 	return 0;
 }
 
@@ -169,6 +173,8 @@ int fs_delete(const char *filename)
             return 0;
         }
     }
+
+       //TODO:clear associated data block ?
 
 	return -1;
 }
@@ -288,37 +294,106 @@ int fs_lseek(int fd, size_t offset)
 }
 
 int fs_write(int fd, void *buf, size_t count)
-{
+{/*
+    int fileOpen = 0;
+    int offset, writeBlock;
     if (fd >= FS_OPEN_MAX_COUNT || fd < 0) {
         return -1;
     }
+
+    for (int k = 0; k < FS_OPEN_MAX_COUNT; k++) {
+        if(fileDescriptors[k].fd == fd) { //check that file descriptor is open
+            fileOpen = 1;
+            for(int i = 0; i < FS_FILE_MAX_COUNT; i++) {
+                if(!strcmp(root[i].filename, fileDescriptors[k].filename)) { //check that file exists on disk
+                    offset = fileDescriptors[k].offset;
+                    writeBlock = find_dataBlock(fileDescriptors[k].offset, root[i].firstBlock); // find the block to write to
+                    break;
+                }
+            }
+            break;
+        }
+    }
+
+    if (!fileOpen)
+        return -1;
+
+    int remainingBytes = root[i].size - fileDescriptors[k].offset; //remainingBytes until end of file
+    if (count > remainingBytes) //extend to hold additional bytes
+
+*/
+                        
+    
 	return 0;
 }
 
 int fs_read(int fd, void *buf, size_t count)
 {
+    int fileOpen = 0;
+    int readBlock, bytesToRead, blockBytes, offset, bytesRead = 0;
+    void* bounceBuffer = NULL;
     if (fd >= FS_OPEN_MAX_COUNT || fd < 0) {
             return -1;
     }
+
     for (int k = 0; k < FS_OPEN_MAX_COUNT; k++) {
-        if(fileDescriptors[k].fd == fd) {
+        if(fileDescriptors[k].fd == fd) { //check that file descriptor is open
+            fileOpen = 1;
             for(int i = 0; i < FS_FILE_MAX_COUNT; i++) {
-                if(!strcmp(root[i].filename, fileDescriptors[k].filename)) {
-                    int readBlock = find_dataBlock(fileDescriptors[k].offset, root[i].firstBlock);
+                if(!strcmp(root[i].filename, fileDescriptors[k].filename)) { //check that file exists on disk
+                    offset = fileDescriptors[k].offset;
+                    readBlock = find_dataBlock(fileDescriptors[k].offset, root[i].firstBlock); // find the block to read from
                     int remainingBytes = root[i].size - fileDescriptors[k].offset; //remainingBytes until end of file
-                    void *bounceBuffer;
-                    block_read(readBlock, bounceBuffer);
-                    if(count > remainingBytes)
-                        memcpy(buf, bounceBuffer + (fileDescriptors[k].offset - 4096*(fileDescriptors[k].offset/4096)), remainingBytes);
+                    if (count > remainingBytes)
+                        bytesToRead = remainingBytes;
                     else
-                        memcpy(buf, bounceBuffer + (fileDescriptors[k].offset - 4096*(fileDescriptors[k].offset/4096)), count);
-                    //now we need to read the rest (span multiple blocks)  when remainingBytes or count > 4096 bytes
+                        bytesToRead = count;
+                    break;
                 }
             }
-            return 0;
+            break;
         }
     }
-    
-	return 0;
+
+    if (!fileOpen)
+        return -1;
+
+    //TODO: test this case
+    if (offset % BLOCK_SIZE != 0) { //first block to read is offset in the middle
+        bounceBuffer = malloc(BLOCK_SIZE);
+        block_read(readBlock, bounceBuffer);
+        blockBytes = offset - BLOCK_SIZE*readBlock; //bytes to read from first block
+        if (bytesToRead < blockBytes) {
+            memcpy(buf, bounceBuffer, bytesToRead);
+            bytesToRead -= bytesToRead;
+            bytesRead += bytesToRead;
+        } else {
+            memcpy(buf, bounceBuffer, blockBytes);
+            readBlock++;
+            bytesRead += bytesToRead;
+            bytesToRead -= blockBytes;
+            buf += blockBytes;
+        }
+        free(bounceBuffer);
+    }
+
+    while (bytesToRead >= BLOCK_SIZE) { //TODO: test this case
+        block_read(readBlock, buf);
+        bytesToRead -= BLOCK_SIZE;
+        bytesRead += BLOCK_SIZE;
+        buf += BLOCK_SIZE;
+        readBlock++;
+    }
+
+    if (bytesToRead != 0) {
+        bounceBuffer = malloc(BLOCK_SIZE);
+        block_read(readBlock, bounceBuffer);
+        memcpy(buf, bounceBuffer, bytesToRead);
+        bytesRead += bytesToRead;
+        bytesToRead -= bytesToRead;
+        free(bounceBuffer);
+    }   
+  
+	return bytesRead;
 }
 
