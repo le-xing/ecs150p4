@@ -55,8 +55,22 @@ superblock_t initSuperblock() {
     return &sblock;
 }
 
-int find_dataBlock(int offset, uint16_t firstBlock){
-    return superblock->data + firstBlock + (offset / BLOCK_SIZE);
+int find_remainingBytes(int fd, int i) //find remainingBytes from offset until end of file of a file identified by a given fd
+{
+	return root[i].size - fileDescriptors[fd].offset;
+}
+
+int find_dataBlock(int fd, int *bytesToRead)
+{
+	for (int i = 0; i < FS_FILE_MAX_COUNT; i++) {
+    	if(!strcmp(root[i].filename, fileDescriptors[fd].filename)) { // Find the associated root entry to get file size
+			int remainingBytes = find_remainingBytes(fd, i); // Bytes that can be read 
+			if (*bytesToRead > remainingBytes)
+				*bytesToRead = remainingBytes;
+			return superblock->data + root[i].firstBlock + (fileDescriptors[fd].offset / BLOCK_SIZE); // First block to read from
+        }
+    }
+    return 0;
 }
 
 int fs_mount(const char *diskname)
@@ -129,7 +143,7 @@ printf("unmounting\n");
     }
 
     free(data);
-    free(fat); // segfault, TODO: will fix later, has to do with block_read during mount, refer to piazza @879
+    //free(fat); // segfault, TODO: will fix later, has to do with block_read during mount, refer to piazza @879
     
     // Close the disk
     if (block_disk_close()) {
@@ -339,38 +353,7 @@ int fs_lseek(int fd, size_t offset)
 
 int fs_write(int fd, void *buf, size_t count)
 {
-/*
-    int fileOpen = 0;
-    int offset, writeBlock, blockBytes, bytesToWrite;
-    void* writeBuffer;
-    if (fd >= FS_OPEN_MAX_COUNT || fd < 0) {
-        return -1;
-    }
-
-    for (int k = 0; k < FS_OPEN_MAX_COUNT; k++) {
-        if(fileDescriptors[k].fd == fd) { //check that file descriptor is open
-            fileOpen = 1;
-            for(int i = 0; i < FS_FILE_MAX_COUNT; i++) {
-                if(!strcmp(root[i].filename, fileDescriptors[k].filename)) { //check that file exists on disk
-                    offset = fileDescriptors[k].offset;
-                    writeBlock = find_dataBlock(fileDescriptors[k].offset, root[i].firstBlock); // find the block to write to
-                    if (offset + count > root[i].size) // extension needed
-                        
-                    break;
-                }
-            }
-            break;
-        }
-    }
-
-    if (!fileOpen)
-        return -1;
-
-
-    int remainingBytes = BLOCK_SIZE*(root[i].size/BLOCK_SIZE) - root[i].size - fileDescriptors[k].offset; //remainingBytes until end of file
-    if (count > remainingBytes) //extend to hold additional bytes
-*/
-                        
+          
     
 	return 0;
 }
@@ -378,83 +361,53 @@ int fs_write(int fd, void *buf, size_t count)
 int fs_read(int fd, void *buf, size_t count)
 {
     //int fileOpen = 0;
-    int readBlock, bytesToRead, blockBytes, bytesRead = 0;
+    int* bytesToRead = (int *)malloc(sizeof(count));
+    int readBlock, blockBytes, bytesRead = 0;
     void* bounceBuffer = NULL;
     if (fd >= FS_OPEN_MAX_COUNT || fd < 0 || fileDescriptors[fd].fd != fd) {
             return -1;
     }
 
-    bytesToRead = count;
-    for (int i = 0; i < FS_FILE_MAX_COUNT; i++) {
-        if(!strcmp(root[i].filename, fileDescriptors[fd].filename)) { // Find the associated root entry to get file size
-            readBlock = find_dataBlock(fileDescriptors[fd].offset, root[i].firstBlock); // First block to read from
-            int remainingBytes = root[i].size - fileDescriptors[fd].offset; // Bytes that can be read 
-            if (count > remainingBytes)
-                bytesToRead = remainingBytes;
-            break;
-        }
-    }
-/*
-    for (fdIndex = 0; fdIndex < FS_OPEN_MAX_COUNT; fdIndex++) {
-        if(fileDescriptors[fdIndex].fd == fd) { //check that file descriptor is open
-            fileOpen = 1;
-            for(int i = 0; i < FS_FILE_MAX_COUNT; i++) {
-                if(!strcmp(root[i].filename, fileDescriptors[fdIndex].filename)) { //check that file exists on disk
-                    offset = fileDescriptors[fdIndex].offset;
-                    readBlock = find_dataBlock(fileDescriptors[fdIndex].offset, root[i].firstBlock); // find the block to read from
-                    int remainingBytes = root[i].size - fileDescriptors[fdIndex].offset; //remainingBytes until end of file
-                    if (count > remainingBytes)
-                        bytesToRead = remainingBytes;
-                    else
-                        bytesToRead = count;
-                    
-                    break;
-                }
-            }
-            break;
-        }
-    }
-
-    if (!fileOpen)
-        return -1;
-*/
+    *bytesToRead = count;
+    readBlock = find_dataBlock(fd, bytesToRead);
+    
     //TODO: test this case
     if (fileDescriptors[fd].offset % BLOCK_SIZE != 0) { // Offset is in middle of a block
         bounceBuffer = malloc(BLOCK_SIZE);
         block_read(readBlock, bounceBuffer);
         blockBytes = fileDescriptors[fd].offset - BLOCK_SIZE*readBlock; // Bytes to read from first block
-        if (bytesToRead < blockBytes) { // Only need to read from this one block
-            memcpy(buf, bounceBuffer, bytesToRead);
-            bytesToRead -= bytesToRead; // bytesToRead = 0
-            bytesRead += bytesToRead;
+        if (*bytesToRead < blockBytes) { // Only need to read from this one block
+            memcpy(buf, bounceBuffer, *bytesToRead);
+            *bytesToRead -= *bytesToRead; // bytesToRead = 0
+            bytesRead += *bytesToRead;
         }
         else { // Read to the end of the block
             memcpy(buf, bounceBuffer, blockBytes);
             readBlock++;
             bytesRead += blockBytes;
-            bytesToRead -= blockBytes;
+            *bytesToRead -= blockBytes;
             buf += blockBytes; //TODO: maybe don't modify buf directly; use a temp pointer initialized to buf instead
             memset(bounceBuffer, 0 , BLOCK_SIZE); // Clear the bounce buffer for possible later use
         }
     }
 
     // Read whole blocks until no longer possible
-    while (bytesToRead >= BLOCK_SIZE) { //TODO: test this case
+    while (*bytesToRead >= BLOCK_SIZE) { //TODO: test this case
         block_read(readBlock, buf);
-        bytesToRead -= BLOCK_SIZE;
+        *bytesToRead -= BLOCK_SIZE;
         bytesRead += BLOCK_SIZE;
         buf += BLOCK_SIZE; //TODO: change buf to temp?
         readBlock++;
     }
 
     // Read any remaining bytes
-    if (bytesToRead != 0) {
+    if (*bytesToRead != 0) {
         if (!bounceBuffer)
             bounceBuffer = malloc(BLOCK_SIZE);
         block_read(readBlock, bounceBuffer);
-        memcpy(buf, bounceBuffer, bytesToRead);
-        bytesRead += bytesToRead;
-        bytesToRead -= bytesToRead;
+        memcpy(buf, bounceBuffer, *bytesToRead);
+        bytesRead += *bytesToRead;
+        *bytesToRead -= *bytesToRead;
     }   
 
     if (bounceBuffer)
