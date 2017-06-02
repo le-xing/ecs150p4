@@ -88,12 +88,11 @@ int fs_mount(const char *diskname)
     }
     // Read FAT blocks
     fat = (uint16_t*)malloc(superblock->numDataBlocks*sizeof(uint16_t));
-printf("data: %d, fat: %d ", superblock->numDataBlocks, superblock->numFATBlocks);
+
     for (int i = 1; i < superblock->root; i++) {
-        block_read(i, (void*)(fat + BLOCK_SIZE*(i - 1)));
+        block_read(i, ((void*)fat) + BLOCK_SIZE*(i - 1));
     }
 
-printf("root: %d", superblock->root);
     // Read the root block
     block_read(superblock->root, (void*)root);
 
@@ -106,15 +105,13 @@ printf("root: %d", superblock->root);
         increment++;
     }
 
-    fat[0] = FAT_EOC; //TODO: do we need to manually make first FAT entry FAT_EOC??
-
     // Count available entries in FAT
-/*    for (int i = 0; i < superblock->numDataBlocks; i++) {
+   for (int i = 0; i < superblock->numDataBlocks; i++) {
         if(fat[i] == 0) {
             fatFree++;
         }
     }
-*/
+
     // Count available entries in root
     for (int j = 0; j < FS_FILE_MAX_COUNT; j++) {
         if(root[j].filename[0] == 0) {
@@ -134,7 +131,6 @@ printf("root: %d", superblock->root);
 
 int fs_umount(void)
 {
-printf("unmounting\n");
     //TODO: write to all blocks, or just modified ones? inside umount() or inside functions that will modify blocks?
     block_write(superblock->root, (void*)root);
 
@@ -143,11 +139,10 @@ printf("unmounting\n");
     }
 
     free(data);
-    //free(fat); // segfault, TODO: will fix later, has to do with block_read during mount, refer to piazza @879
+    free(fat); // segfault, TODO: will fix later, has to do with block_read during mount, refer to piazza @879
     
     // Close the disk
     if (block_disk_close()) {
-printf("closing disk\n");
         return -1;
     }
 
@@ -274,28 +269,11 @@ int fs_close(int fd)
         return -1;
     }
 
-//NOTE: since fd = k assigned in open, probably don't have to use a for loop to find it
-
     // Reset associated fileDescriptors entry
     memset(fileDescriptors[fd].filename, 0, FS_FILENAME_LEN);
     fileDescriptors[fd].fd = -1;
     fileDescriptors[fd].offset = -1;
     return 0;
-/*
-    // Reset associated fileDescriptors entry
-    for (int k = 0; k < FS_OPEN_MAX_COUNT; k++) {
-        if(fileDescriptors[k].fd == fd) {
-            memset(fileDescriptors[k].filename, 0, FS_FILENAME_LEN); 
-            fileDescriptors[k].fd = -1;
-            fileDescriptors[k].offset = -1;
-            numOpen--;
-            return 0;
-        }
-    }
-    
-    // File descriptor @fd was not open
-	return -1;
-*/
 }
 
 int fs_stat(int fd)
@@ -312,18 +290,6 @@ int fs_stat(int fd)
         }
     }
 
-/*
-    // Find the file size of the file associated with file descriptor @fd
-    for (int k = 0; k < FS_OPEN_MAX_COUNT; k++) {
-        if(fileDescriptors[k].fd == fd) {
-            for(int i = 0; i < FS_FILE_MAX_COUNT; i++) {
-                if(!strcmp(root[i].filename, fileDescriptors[k].filename)) {
-                    return root[i].size;
-                }
-            }   
-        }
-    }
-*/
     // Function should not reach here if file size successfully found
 	return -1;
 }
@@ -337,30 +303,16 @@ int fs_lseek(int fd, size_t offset)
 
     fileDescriptors[fd].offset = offset;
     return 0;
-/*
-
-    // Find the associated fileDescriptors entry 
-    for (int k = 0; k < FS_OPEN_MAX_COUNT; k++) {
-        if(fileDescriptors[k].fd == fd) {
-            fileDescriptors[k].offset = offset;
-            return 0;
-        }
-    }
- 
-	return -1; //file descriptor was not open
-*/
 }
 
 int fs_write(int fd, void *buf, size_t count)
 {
           
-    
 	return 0;
 }
 
 int fs_read(int fd, void *buf, size_t count)
 {
-    //int fileOpen = 0;
     int* bytesToRead = (int *)malloc(sizeof(count));
     int readBlock, blockBytes, bytesRead = 0;
     void* bounceBuffer = NULL;
