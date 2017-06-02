@@ -1,0 +1,90 @@
+offset divisible by BLOCK_SIZE
+	count > remainingBytes? (then read remainingBytes # of bytes)
+		remainingBytes >= BLOCK_SIZE? (then read multiple blocks)
+			remainingBytes divisible by BLOCK_SIZE? (then don't need bounce buffer)
+				block_read
+			remainingBytes not divisible by BLOCK_SIZE? (then need bounce buffer on last block)
+				block_read until last block
+				bouncebuffer last block
+				memcpy from bouncebuffer
+		remainingBytes < BLOCK_SIZE? (then read 1 block and need bouncebuffer for first block)
+			bouncebuffer first block
+			memcpy from bouncebuffer
+	count <= remainingBytes? (then read count # of bytes)
+		count >= BLOCK_SIZE? (then read multiple blocks)
+			count divisible by BLOCK_SIZE? (then don't need bounce buffer)
+				block_read
+			count not divisible by BLOCK_SIZE? (then need bounce buffer on last block)
+				block_read until last block
+				bounce buffer last block
+				memcpy from bouncebuffer
+		count < BLOCK_SIZE? (then read 1 block, need bouncebuffer for first block)
+			bouncebuffer first block
+			memcpy from bouncebuffer
+			
+
+offset not divisible by BLOCK_SIZE (then bouncebuffer first block)
+	bouncebuffer first block
+	if count + offset <= BLOCK_SIZE 
+		memcpy(buf, boundbuffer + offset, count); 
+	else if count + offset > BLOCK_SIZE (read multiple blocks)
+		
+		
+	count > remainingBytes?
+		
+	count <= remainingBytes?
+
+offset = 5000 - 4096 = 904
+	second block 904th byte 
+offset - offset/4096? = blockOffset
+find_dataBlock = 2
+offset - BLOCK_SIZE*find_dataBlock = blockOffset
+bounceBuffer block 2
+memcpy(buf, bounceBuffer + blockOffset, count) (if count < BLOCK_SIZE - blockOffset)
+if count > BLOCK_SIZE - blockOffset
+	blockCount = BLOCK_SIZE - blockOffset
+		memcpy(buf, bounceBuffer + blockOffset, blockCount)
+		count -= blockCount
+		if count % block_size = 0
+			block_read
+		else
+			block_read until last block
+			bouncebuffer
+			memcpy 
+
+data starts at block 6
+if root[i].firstBlock = 1
+then readBlock = 6
+
+
+get block to write to = writeBlock
+check how many remainingBytes in block
+if count > remaininBytes (have to extend??)
+
+file size = 10 bytes
+offset = 0
+remainingbytes = 10
+count = 20 bytes
+-> don't need to extend b/c block = 4096, remainder of block = 4096 - 10 = 4086
+
+
+root[i].size = 10000
+offset = 9000
+
+10000/4096 = 2
+1808 on block 3
+remainingBytes = 2288
+blockoffset = offset - (size/BLOCK_SIZE); 
+if offset + count > size ?
+	write from offset until end of block or until offset + count?
+		remainingBytes = BLOCK_SIZE*(size/BLOCK_SIZE) - offset
+			if(offset + count - BLOCK_SIZE*(size/BLOCK_SIZE) > remainingBytes) //need to extend blocks and write
+				//write until end of block; (writeBlock should currently be 0xFFFF in FAT)
+				//loop through FAT until 0 found, set to 0xFFFF, writeBlock in FAT points to new FAT block
+				//writeBlock = new block index; write to writeBlock
+			else //write until count
+				blockOffset = offset - (size/BLOCK_SIZE)
+				block_read(writeBlock, writeBuffer)
+				memcpy(writeBuffer + blockOffset, buf, count)
+				increment offset in fileDescriptors[fdIndex]
+				block_write(writeBlock, writeBuffer)
