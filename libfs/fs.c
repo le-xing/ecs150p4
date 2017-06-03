@@ -51,6 +51,7 @@ uint16_t *fat = NULL;
 int fatFree = 0;
 int rootFree = 0;
 int numOpen = 0;
+int isMounted = 0;
 
 superblock_t initSuperblock() {
     memset(sblock.signature, 0, 8);
@@ -124,6 +125,8 @@ int fs_mount(const char *diskname)
         fileDescriptors[k].fd = -1;
         fileDescriptors[k].offset = -1;
     }
+    
+    isMounted = 1;
 	return 0;
 }
 
@@ -142,6 +145,8 @@ int fs_umount(void)
     if (block_disk_close()) {
         return -1;
     }
+
+    isMounted = 0;
 
 	return 0;
 }
@@ -162,7 +167,7 @@ int fs_info(void)
 int fs_create(const char *filename)
 {
     // Don't create if no more space on disk or @filename is invalid
-    if (rootFree == 0 || strlen(filename) > FS_FILENAME_LEN || filename[strlen(filename)] != '\0')
+    if (!isMounted || rootFree == 0 || strlen(filename) > FS_FILENAME_LEN || filename[strlen(filename)] != '\0')
         return -1;
 
     // Don't create file if a file with the same name already exists on the FS
@@ -191,7 +196,7 @@ int fs_delete(const char *filename)
     void* bounceBuffer = NULL;
 
     // Check if @filename is valid
-    if (strlen(filename) > FS_FILENAME_LEN || filename[strlen(filename)] != '\0')
+    if (!isMounted || strlen(filename) > FS_FILENAME_LEN || filename[strlen(filename)] != '\0')
         return -1;
 
     // Don't delete the file if it is open
@@ -231,6 +236,9 @@ int fs_delete(const char *filename)
 
 int fs_ls(void)
 {
+    if(!isMounted)
+        return -1;
+
     printf("FS Ls:\n");
     for(int i = 0; i < FS_FILE_MAX_COUNT; i++) {
         if(root[i].filename[0] != 0) {
@@ -245,7 +253,7 @@ int fs_open(const char *filename)
     int fileExists = 0;
 
     // Don't open if disk cannot open any more files or @filename is invalid
-    if (numOpen == FS_OPEN_MAX_COUNT || strlen(filename) > FS_FILENAME_LEN || filename[strlen(filename)] != '\0') 
+    if (!isMounted || numOpen == FS_OPEN_MAX_COUNT || strlen(filename) > FS_FILENAME_LEN || filename[strlen(filename)] != '\0') 
        return -1;
  
     // Check if the file exists on the disk 
@@ -277,7 +285,7 @@ int fs_open(const char *filename)
 int fs_close(int fd)
 {
     // Check if @fd is valid and file with @fd is open
-    if (fd  >= FS_OPEN_MAX_COUNT || fd < 0 || fileDescriptors[fd].fd != fd) {
+    if (!isMounted || fd  >= FS_OPEN_MAX_COUNT || fd < 0 || fileDescriptors[fd].fd != fd) {
         return -1;
     }
 
@@ -291,7 +299,7 @@ int fs_close(int fd)
 int fs_stat(int fd)
 {
     // Check if @fd valid and file with @fd is open
-    if (fd >= FS_OPEN_MAX_COUNT || fd < 0 || fileDescriptors[fd].fd != fd) {
+    if (!isMounted || fd >= FS_OPEN_MAX_COUNT || fd < 0 || fileDescriptors[fd].fd != fd) {
         return -1;
     }
 
@@ -309,7 +317,7 @@ int fs_stat(int fd)
 int fs_lseek(int fd, size_t offset)
 {
     // Check if @fd and @offset valid and file with @fd is open
-    if (fd  >= FS_OPEN_MAX_COUNT || fd < 0 || offset < 0 || offset > fs_stat(fd) || fileDescriptors[fd].fd != fd) {
+    if (!isMounted || fd  >= FS_OPEN_MAX_COUNT || fd < 0 || offset < 0 || offset > fs_stat(fd) || fileDescriptors[fd].fd != fd) {
         return -1;
     }
 
@@ -322,7 +330,7 @@ int fs_write(int fd, void *buf, size_t count)
     int* bytesToWrite = (int *)malloc(sizeof(count));
     int writeBlock, blockBytes, blockOffset, bytesWritten = 0;
     void* bounceBuffer = malloc(BLOCK_SIZE);
-    if (fd >= FS_OPEN_MAX_COUNT || fd < 0 || fileDescriptors[fd].fd != fd) {
+    if (!isMounted || fd >= FS_OPEN_MAX_COUNT || fd < 0 || fileDescriptors[fd].fd != fd) {
             return -1;
     }
 
@@ -411,7 +419,7 @@ int fs_read(int fd, void *buf, size_t count)
     int* bytesToRead = (int *)malloc(sizeof(count));
     int readBlock, blockBytes, blockOffset, bytesRead = 0;
     void* bounceBuffer = NULL;
-    if (fd >= FS_OPEN_MAX_COUNT || fd < 0 || fileDescriptors[fd].fd != fd) {
+    if (!isMounted || fd >= FS_OPEN_MAX_COUNT || fd < 0 || fileDescriptors[fd].fd != fd) {
             return -1;
     }
 
