@@ -19,61 +19,129 @@ For the fat blocks, we malloced the correct size by utilizing `numDataBlocks`
 from the superblock. Then we go through each index and read in each block
 with `block_read(i, ((void*)fat) + BLOCK_SIZE*(i - 1))`. For the root, we
 read in the index of the root block which is obtained by `superblock->root`
-by using `block_read(superblock->root, (void*)root)`.
+by using `block_read(superblock->root, (void*)root)`. Then we use a for
+loop to calculate the number of available entrees in the FAT and root.
+It is also here that we initialize the file descriptor struct to hold
+the necessary data associated with a file descriptor (the filename,
+the file descriptor number, and the offset).
+We then wrote `fs_info()` with print statements to the appropriate values
+we just obtained from reading in the blocks from the disk.
 
-* Testing
+* Unmounting
 
-For testing, at this point, tps.x worked and should continue to work
-throughout the rest of this phase.
+We call `block_write(superblock->root, (void*)root)` to write the current
+files and data out to disk. We then free memory we allocated for file
+descriptors and the fat, before finally closing the disk with
+`block_disk_close()`.
 
-* Phase 2.2: Protected TPS
+* Testing: fs_info()
 
-To add TPS protection, in `tps_create()`, we modified the `mmap` function
-protect parameter to be `PROT_NONE` to have no read/write permisson by default.
-In `tps_read()` and `tps_write()`, we used `mprotect` on the page to modify
-this parameter and allow reads and writes temporarily with PROT_READ and
-PROT_WRITE respectively. After the page is accessed, `mprotect` sets the
-protect parameter back to PROT_NONE.
-This gives birth to a new source for segfaults that occur whenever a thread
-tries to access a TPS area that is protected. To differentiate this from other
-segfaults, we defined a segfault handler that iterates with `queue_iterate()`
-and `find_page()` to find if the address where the fault occured matches one
-of the addresses of the beginning of the TPS areas. If there is a match, it
-prints an error message to stderr and transmits the signal again to cause the
-program to crash. This signal catching is set up in `tps_init()`.
+For testing, at this point, `fs_info()` output corresponds correctly with the
+reference program. We had a few issues with freeing FAT's allocated memory in
+unmount, but found out we were allocating too much when we were incrementing
+the pointer for each iteration of the for loop.
 
-* Testing
+## Phase 2: File creation/deletion
 
-For testing, we deliberately commented out the mprotect functions in
-`tps_read()` and `tps_write()` to cause a segfault from accessing protected
-TPS areas. This caused tps.x to output as expected:
-```
-thread2: read OK!
-thread1: read OK!
-TPS protection error!
-segmentation fault (core dumped)
-```
+* Creation
 
-* Phase 2.3: Copy-on-Write cloning
+We find an empty entry in the root directory by iterating through the root
+array and looking for one where the first character of the filename is 0,
+which means the entry is empty. We then initialize the newly created fileh
+and `block_write(superblock->root, (void*) root)` the change to disk.
 
-We added another level of indirection by replacing the pointer to the page in
-the tps object with a pointer to a struct that contains a pointer to the page.
-This new struct also contains a count that refers to how many TPSes are
-sharing it. we create this new page struct In `tps_create()`.
-Because we don't want to create a new page in `tps_clone()`, we had to, instead of
-calling `tps_create()`, give `curTPS` the address of `sourceTPS`'s page and then
-increase the count for that page.
-In `tps_write()`, if the page the `curTPS` is referring to has a count greater
-than 1, we must allocate memory and create a new page for the calling thread to
-write to so that it doesn't change the contents of the page for other threads.
-When cloning the contents of the page, we must also use mprotect to temporarily
-allow the original page to be read from and the new page to be written to. The
-new page's count is set to 1 and we make the `curTPS->mempage` now refer to the
-new page.
+* Deletion
 
-* Testing
+We look for the associated file in the root directory by comparing filename
+with root[i].filename. Once that is done, we reset the associated fat entries,
+data blocks, and root entry by reading from disk the data block we want to
+delete into a buffer, clearing the memory with
+`memset(bounceBuffer, 0, BLOCK_SIZE)`, and writing the changes to disk.
+We then reset the fat entry and root entry by setting the appropriate values
+to each of the associated members. We don't forget to increment the counter
+for `fatFree` and `rootFree`.
 
-For testing, we used ddd and printed the addresses of the pages after we cloned
-the page to make sure they had the same addresses. We then printed the addresses
-of the pages after writing to make sure if the page was shared, the current
-thread wrote to a new page with a different address.
+* Testing: fs_ls()
+
+We matched the output by going through each of the root entries and printing
+the associated data if the root entry isn't empty.
+
+## Phase 3: File Descriptor operations
+
+* File Descriptors
+
+Our file descriptor array holds a max number of 32 file descriptors. To allow
+for the filename to be open multiple times with unique file descriptors, we
+do not check for the filename being in use, and only check for unused `fd`s.
+We represented file descriptors with a struct that contains the `filename`,
+the `fd`, and the `offset`.
+
+* Open
+
+One caveat here was that when we were checking if the file exists on disk and
+returning -1 if it doesn't, we had to check all values and return at the end
+outside the for loop by checking a flag we created for whether or not the file
+exists.
+To open a file descriptor, we assign a file descriptor entry to the associated
+filename. We decided to make `fd` be -1 to represent an unused file descriptor
+so we look for the first available file descriptor and assign it its* 
+appropriate index.
+
+* Close
+
+We close the file by doing the opposite of Open: we memset the filename and
+set the associated `fd` and `offset` to -1.
+
+* Testing: fs_stat()
+
+`fs_stat()` searches the root directory for the associated `fd` in the file
+descriptor array that matches `filename` and returns the size. `fs_lseek`
+sets the `offset` of the given `fd`'s `offset`.
+
+## Phase 4: File reading/writing
+
+* Helper Functions
+
+We wrote a function `find_dataBlock` to find the index of the data block
+that the offset leads us to. Because we didn't want to reuse the same loop,
+we had this function also set `bytesToModify` to be the number of bytes
+we will actually read in case the specified `count` is greater than the 
+number of bytes until the end of file.
+
+We did not write a function that allocates a new data block and links it
+to the end of the file's data block chain because our implementation only
+uses this loop once.
+
+* Read
+
+For read and write, we mapped out the logic on paper before translating
+into code. After we find the block we are reading from with our helper
+function and find how many bytes we are actually reading, we check if
+the offset is in the middle of the block. Then we check if this is the
+only block we are reading from. If so, we just read to the buffer normally.
+Otherwise, we read to the end of the block and prepare the `bounceBuffer`
+for later use. We then read entire blocks with `block_read()` until no
+longer possible. After that, we read any remaining bytes that need to be
+read by loading the last block into the `bounceBuffer` and reading
+the remaining bytes from the `bounceBuffer` into the user-supplied buffer.
+We finally free the memory we allocated for `bounceBuffer` and `bytesToRead`
+and increment the file descriptor offset before returning the number of
+bytes read.
+
+* Write
+
+`fs_write()` uses the same logic as `fs_read()` to check the possible
+"mismatch" cases. The difference here is that we always try to write count
+unless there is no space on disk available. As we write entire blocks,
+we check if we must allocate more data blocks to continue writing. If so,
+we iterate through the datablocks and check if it's associated FAT entry
+is 0 which means it's free. We then assign the previous last FAT entry of
+the file the index of the next free FAT entry that we just found. We also
+check if there is no more space on disk by checking if there are no more
+free FAT blocks to add to the chainmap. If so, we just return the number
+of bytes we have written so far. The next block of code occurs if we
+still have bytes to write in the last block of the file, and writes
+by reading in the data to `bounceBuffer`, `memcpy`ing to it, and then
+writing the data in the `bounceBuffer` back to disk. We finish by updating
+the file size, freeing allocated memory, incrementing the offset, and
+returning the number of bytes written.
