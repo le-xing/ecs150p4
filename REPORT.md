@@ -10,19 +10,16 @@ allocated and used as an array.
 
 ## Phase 1: Mounting/unmounting
 
-* Phase 2.1: Unprotected TPS with naive cloning
+* Mounting
 
-`tps_init()` only created the TPS queue to hold all the Threads' TPSes.
-We used `queue_iterate()` whenever we wanted to see if a TPS exists for a
-thread and whenever we wanted to find a specific thread's TPS.
-For this phase, we initially used `mmap` with protect parameter
-`PROT_READ | PROT_WRITE` to allocate a page of memory to the unprotected TPS.
-`tps_clone()` did naive cloning by creating a `sourceTPS` to store the source
-TPS. We then used `tps_create()` to create a new `curTPS` and call memcpy on 
-the source TPS's page to create a direct copy into `curTPS`.
-We also added critical sections to `tps_create()`, `tps_destroy()`,
-`tps_read()`, `tps_write()`, and `tps_clone()` because they modify a global
-`curTPS` variable that refers to the current running thread's TPS.
+To open the disk we call `block_disk_open(diskname)`. Then, before mounting,
+we must initialize the superblock, fat blocks, and root block. We defined
+a separate initialization function to handle the superblock's initialization.
+For the fat blocks, we malloced the correct size by utilizing `numDataBlocks`
+from the superblock. Then we go through each index and read in each block
+with `block_read(i, ((void*)fat) + BLOCK_SIZE*(i - 1))`. For the root, we
+read in the index of the root block which is obtained by `superblock->root`
+by using `block_read(superblock->root, (void*)root)`.
 
 * Testing
 
